@@ -105,11 +105,14 @@ mtgo-match-tracker/
 │   ├── static/           # CSS, JS (Chart.js), images
 │   └── main.py           # FastAPI app entry point
 ├── agent/                # MTGO log agent (separate deployable)
-│   ├── tray.py           # pystray tray icon + menu
+│   ├── tray.py           # pystray tray icon + menu + thread orchestration
 │   ├── watcher.py        # Filesystem watcher (watchdog)
-│   ├── parser.py         # Binary .dat file parser
-│   ├── sender.py         # API client (httpx, HTTPS)
+│   ├── parser.py         # .dat / plaintext log parser (stub with extension points)
+│   ├── sender.py         # API client (httpx, HTTPS, bearer auth)
 │   ├── updater.py        # Self-update via GitHub Releases
+│   ├── config.py         # Config load/save (%APPDATA%\MTGOMatchTracker\config.toml)
+│   ├── assets/           # icon.ico for PyInstaller + tray
+│   ├── requirements.txt  # pystray, Pillow, watchdog, httpx, semver, pyinstaller
 │   └── main.py           # Agent entry point
 ├── alembic/              # Database migrations
 ├── tests/                # pytest tests
@@ -238,7 +241,7 @@ All runners are self-hosted. Three runner labels in use:
 
 No Jetson/ARM runner needed (no GPU workloads). Multi-arch builds (amd64 + arm64) via QEMU emulation on the docker runner for future ARM deployment flexibility.
 
-### Workflow layout (4 files)
+### Workflow layout (5 files)
 
 **`ci.yml`** — runs on PR only:
 - Lint (ruff — `app/` and `tests/`)
@@ -251,8 +254,16 @@ No Jetson/ARM runner needed (no GPU workloads). Multi-arch builds (amd64 + arm64
 
 **`release.yml`** — runs on `v*.*.*` tag push:
 - Build and push app + caddy images to GHCR (`ghcr.io/sentania-labs/tamiyo-*`)
-- Tags: semver + latest
+- Build Windows agent exe via PyInstaller on `windows-latest` GitHub-hosted runner
+- Tags: semver + latest; attaches Windows exe as release asset
 - Creates GitHub Release with auto-generated notes
+
+**`windows-agent-build.yml`** — runs on PR + `v*.*.*` tag:
+- `windows-latest` GitHub-hosted runner (no self-hosted needed for agent builds)
+- Installs Python 3.12, pip installs `agent/requirements.txt` + PyInstaller
+- Runs `pyinstaller --onefile --windowed --name MTGOMatchTracker agent/main.py`
+- PR: uploads as workflow artifact (30-day retention)
+- Tag: attaches `.exe` to the GitHub Release (release must already exist or this job runs after `create-release`)
 
 **`cleanup.yml`** — weekly Sunday 03:00 UTC:
 - `docker system prune -f` + `docker builder prune --keep-storage 5GB` on each runner
@@ -274,6 +285,134 @@ Fail on CRITICAL and HIGH CVEs with known fixes. Use `ignore-unfixed: true` to s
 ### Compose smoke test
 
 Runs after all image builds pass. Seeds minimal `.env` (TLS_MODE=off), starts the stack, polls `/healthz` until healthy, tears down. Tests run in DinD (Docker-in-Docker) — use `docker create + cp` not bind mounts for injecting test files.
+
+## MTGO Agent — Phase 2 Detail
+
+### File layout
+
+```
+agent/
+├── main.py          # Entry point: init config, start tray
+├── tray.py          # pystray tray icon + menu + thread orchestration
+├── watcher.py       # watchdog filesystem monitor on MTGO log dir
+├── parser.py        # .dat / plaintext log parser (stub; see below)
+├── sender.py        # httpx async client, bearer auth, TLS
+├── updater.py       # GitHub Releases self-update
+├── config.py        # Config load/save to %APPDATA%\MTGOMatchTracker\config.toml
+└── requirements.txt # pystray, Pillow, watchdog, httpx, tomli/tomllib, semver, pyinstaller
+```
+
+### Config file
+
+Location: `%APPDATA%\MTGOMatchTracker\config.toml`
+
+```toml
+[server]
+url = "https://mtgo.int.sentania.net"   # server base URL
+tls_verify = true                        # set false for self-signed lab cert
+
+[agent]
+agent_id = ""          # UUID assigned at registration; empty = not yet registered
+api_token = ""         # bearer token; empty = not yet registered
+machine_name = ""      # human-readable label for this desktop
+
+[mtgo]
+log_dir = "C:\\Users\\<user>\\AppData\\Local\\Apps\\2.0\\<mtgo>\\GamingAudioInterop"
+# ^ default MTGO log directory; user can override
+
+[updates]
+check_interval_hours = 1
+include_prereleases = false
+github_token = ""      # optional; needed if repo is private
+```
+
+Config is loaded at startup and written atomically (write to `.tmp`, rename). Never store user passwords in config — only the registration token issued by the server.
+
+### Windows startup
+
+Use a Startup folder shortcut (`%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup\`) rather than a registry Run key. Less invasive, user can easily disable by removing the shortcut, and does not require elevated privileges to install.
+
+### Tray menu
+
+```
+[icon] MTGO Match Tracker
+  ├── Status: Monitoring / Paused / Not registered
+  ├── ────────────────────
+  ├── Pause Monitoring      (toggles to Resume when paused)
+  ├── Open Dashboard        (opens server URL in browser)
+  ├── ────────────────────
+  ├── Check for Updates
+  ├── Settings...           (opens config file in default editor)
+  ├── Open Log              (opens current log file in default editor)
+  ├── ────────────────────
+  └── Quit
+```
+
+If not yet registered, "Status" shows "Not registered" and clicking it opens the registration dialog.
+
+### Registration flow
+
+On first launch with no `agent_id` in config:
+1. Show a simple `tkinter` dialog (single-file, no extra dep) prompting for server URL + username + password.
+2. POST to `{server_url}/api/v1/agent/register` with `{username, password, machine_name, platform: "windows"}`.
+3. On success, store `agent_id` and `api_token` in config. Never store password.
+4. Subsequent launches skip registration.
+
+Pairing token flow (alternative): server can pre-generate a token; user pastes it into the dialog instead of typing credentials. Both paths call the same endpoint — the server disambiguates by payload shape.
+
+### Parser stub — MTGO log format
+
+The exact `.dat` binary format is not yet reverse-engineered. The parser is a **typed stub** that:
+- Defines `ParsedMatch`, `ParsedGame`, `ParsedPlay` dataclasses matching the server's upload schema
+- Reads the MTGO `GameLog*.dat` binary file, logs `TODO: reverse-engineer .dat format`, and returns `None`
+- Falls back to reading MTGO's plaintext `.log` files in the same directory, extracting a minimal match result (winner/loser lines) as a partial `ParsedMatch`
+- Extension point: `parser.py` exports `parse_dat_file(path) -> ParsedMatch | None` and `parse_text_log(path) -> ParsedMatch | None`; `watcher.py` calls both and takes the richer result
+
+### Self-update flow
+
+1. On startup and every `check_interval_hours`, fetch `https://api.github.com/repos/sentania-labs/mtgo-match-tracker/releases/latest` (auth header if `github_token` set).
+2. Compare latest tag semver against `__version__` (baked in by PyInstaller build).
+3. If newer: download the `MTGOMatchTracker.exe` release asset, verify SHA256 against `MTGOMatchTracker.exe.sha256` asset.
+4. Write new exe to `%TEMP%\MTGOMatchTracker_update.exe`.
+5. Show tray notification "Update available — restart to apply." Tray menu gains "Restart to Update" item.
+6. On user confirmation: `subprocess.Popen([new_exe])` then `sys.exit(0)`. The new exe launches, replaces the old file in place.
+
+If checksum fails: discard download, log error, notify user.
+
+### Sender TLS behavior
+
+```python
+# TLS_VERIFY from config:
+# true  → httpx default (system trust store, or bundled cacert.pem from PyInstaller)
+# false → httpx verify=False (lab with self-signed; warns loudly in log)
+# "/path/to/ca.pem" → httpx verify=path (custom CA bundle)
+```
+
+### PyInstaller build
+
+```bash
+pyinstaller \
+  --onefile \
+  --windowed \          # no console window on Windows
+  --name MTGOMatchTracker \
+  --icon agent/assets/icon.ico \
+  agent/main.py
+```
+
+`--windowed` suppresses the console window that would flash on startup. The tray icon IS the UI.
+
+Add `agent/assets/icon.ico` — a placeholder 16x16 / 32x32 multi-res icon (can be programmatically generated with Pillow if no .ico file exists yet).
+
+### Windows agent build workflow
+
+`.github/workflows/windows-agent-build.yml`:
+- Trigger: `pull_request` to main (artifact only) + `push` on `v*.*.*` tags (attaches to release)
+- Runner: `windows-latest` (GitHub-hosted; free, no self-hosted needed)
+- Steps: `actions/checkout@v4`, `actions/setup-python@v5` (3.12), `pip install -r agent/requirements.txt pyinstaller`, `pyinstaller --onefile --windowed --name MTGOMatchTracker agent/main.py`
+- PR: `actions/upload-artifact@v4` uploads `dist/MTGOMatchTracker.exe` (30-day retention)
+- Tag: `softprops/action-gh-release@v2` with `files: dist/MTGOMatchTracker.exe` + a companion `dist/MTGOMatchTracker.exe.sha256` generated by `certutil -hashfile`
+
+Needs the release to exist first — coordinate with `create-release` job in `release.yml` via `needs:` or run as separate workflow triggered by `release: types: [created]`.
 
 ## Development
 
