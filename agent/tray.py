@@ -1,9 +1,9 @@
 """Tray application — pystray icon + menu + thread orchestration.
 
-The tray event loop is blocking; the watcher runs in a thread and the
-updater runs on a periodic schedule. All module imports are guarded so
-the module stays importable on Linux CI even when pystray/PIL aren't
-available or can't spawn a tray backend.
+The tray event loop is blocking; the watcher, heartbeat, and updater
+all run on their own threads. Module imports are guarded so the module
+stays importable on Linux CI where pystray's backend may fail to bind
+a display.
 """
 from __future__ import annotations
 
@@ -13,17 +13,14 @@ import subprocess
 import sys
 import threading
 import webbrowser
+from enum import Enum
 from pathlib import Path
 from typing import Any
 
 from agent.config import AppConfig, get_config_path
 from agent.parser import ParsedMatch
 from agent.sender import AgentSender
-from agent.updater import (
-    apply_update,
-    check_for_update,
-    download_and_verify,
-)
+from agent.updater import check_for_update
 from agent.watcher import MTGOWatcher
 
 try:
@@ -41,11 +38,18 @@ except Exception:  # pragma: no cover — pystray picks a display backend at
 logger = logging.getLogger(__name__)
 
 
+class ConnectionStatus(str, Enum):
+    UNKNOWN = "unknown"
+    NOT_REGISTERED = "not-registered"
+    CONNECTED = "connected"
+    OFFLINE = "offline"
+    PAUSED = "paused"
+
+
 def _make_default_icon() -> Any:
     if Image is None:
         return None
-    img = Image.new("RGB", (64, 64), color=(30, 80, 200))
-    return img
+    return Image.new("RGB", (64, 64), color=(30, 80, 200))
 
 
 def _load_icon(assets_dir: Path) -> Any:
@@ -74,7 +78,9 @@ class TrayApp:
         self._stop = threading.Event()
         self._watcher: MTGOWatcher | None = None
         self._icon: Any = None
+        self._heartbeat_thread: threading.Thread | None = None
         self._update_thread: threading.Thread | None = None
+        self._last_heartbeat_ok: bool | None = None
 
     # ---- lifecycle -----------------------------------------------------
 
@@ -89,8 +95,30 @@ class TrayApp:
         self._icon = pystray.Icon("mtgo-match-tracker", icon_image, "MTGO Match Tracker", menu)
 
         self._start_watcher()
+        self._start_heartbeat_loop()
         self._start_update_loop()
         self._icon.run()
+
+    # ---- status --------------------------------------------------------
+
+    def connection_status(self) -> ConnectionStatus:
+        if not self._config.agent.api_token:
+            return ConnectionStatus.NOT_REGISTERED
+        if self._paused:
+            return ConnectionStatus.PAUSED
+        if self._last_heartbeat_ok is None:
+            return ConnectionStatus.UNKNOWN
+        return ConnectionStatus.CONNECTED if self._last_heartbeat_ok else ConnectionStatus.OFFLINE
+
+    def _status_text(self) -> str:
+        labels = {
+            ConnectionStatus.NOT_REGISTERED: "Status: Not registered",
+            ConnectionStatus.PAUSED: "Status: Paused",
+            ConnectionStatus.UNKNOWN: "Status: Connecting…",
+            ConnectionStatus.CONNECTED: "Status: Connected",
+            ConnectionStatus.OFFLINE: "Status: Offline",
+        }
+        return labels[self.connection_status()]
 
     # ---- watcher -------------------------------------------------------
 
@@ -115,7 +143,40 @@ class TrayApp:
         except Exception:
             logger.exception("Failed to upload match %s", match.mtgo_match_id)
 
-    # ---- update loop ---------------------------------------------------
+    # ---- heartbeat loop ------------------------------------------------
+
+    def _start_heartbeat_loop(self) -> None:
+        interval = max(5, int(self._config.heartbeat.interval_seconds))
+
+        def _loop() -> None:
+            while not self._stop.is_set():
+                if self._paused or not self._config.agent.api_token:
+                    if self._stop.wait(interval):
+                        return
+                    continue
+                try:
+                    ok = asyncio.run(self._sender.heartbeat())
+                except Exception:
+                    logger.exception("Heartbeat raised")
+                    ok = False
+                self._set_heartbeat_result(ok)
+                if self._stop.wait(interval):
+                    return
+
+        thread = threading.Thread(target=_loop, name="mtgo-heartbeat", daemon=True)
+        thread.start()
+        self._heartbeat_thread = thread
+
+    def _set_heartbeat_result(self, ok: bool) -> None:
+        changed = self._last_heartbeat_ok != ok
+        self._last_heartbeat_ok = ok
+        if changed and self._icon is not None:
+            try:
+                self._icon.update_menu()
+            except Exception:
+                logger.exception("Failed to refresh tray menu")
+
+    # ---- update loop (check-only, MVP) ---------------------------------
 
     def _start_update_loop(self) -> None:
         interval_hours = max(1, int(self._config.updates.check_interval_hours))
@@ -132,6 +193,7 @@ class TrayApp:
         self._update_thread = thread
 
     def _check_updates_once(self) -> None:
+        """MVP: check only. Download + restart flow deferred."""
         try:
             result = asyncio.run(check_for_update(self._config))
         except Exception:
@@ -139,21 +201,8 @@ class TrayApp:
             return
         if result is None:
             return
-        tag, url = result
-        token = self._config.updates.github_token or None
-        try:
-            new_exe = asyncio.run(download_and_verify(url, token))
-        except Exception:
-            logger.exception("Update download failed")
-            return
-        if new_exe is None:
-            return
-        self._notify(f"Update {tag} ready — restart to apply")
-        # Fire-and-forget; user confirmation handled via tray menu in real flow.
-        try:
-            apply_update(new_exe)
-        except SystemExit:
-            raise
+        tag, _url = result
+        self._notify(f"Update {tag} available — grab the exe from GitHub Releases")
 
     # ---- menu handlers -------------------------------------------------
 
@@ -178,16 +227,14 @@ class TrayApp:
             MenuItem("Quit", self._on_quit),
         )
 
-    def _status_text(self) -> str:
-        if not self._config.agent.agent_id:
-            return "Status: Not registered"
-        if self._paused:
-            return "Status: Paused"
-        return "Status: Monitoring"
-
     def _on_pause_resume(self, icon: Any, item: Any) -> None:
         self._paused = not self._paused
         logger.info("Monitoring %s", "paused" if self._paused else "resumed")
+        if self._icon is not None:
+            try:
+                self._icon.update_menu()
+            except Exception:
+                logger.exception("Failed to refresh tray menu")
 
     def _on_open_dashboard(self, icon: Any, item: Any) -> None:
         webbrowser.open(self._config.server.url)

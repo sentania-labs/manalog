@@ -58,6 +58,19 @@ class AgentSender:
         data = resp.json()
         return data["agent_id"], data["api_token"]
 
+    async def heartbeat(self) -> bool:
+        if not self._config.agent.api_token:
+            return False
+        try:
+            resp = await self._client.post("/api/v1/agent/heartbeat")
+        except httpx.HTTPError as exc:
+            logger.info("Heartbeat failed: %s", exc)
+            return False
+        if resp.is_success:
+            return True
+        logger.info("Heartbeat rejected: %s %s", resp.status_code, resp.text[:200])
+        return False
+
     async def upload(self, match: ParsedMatch) -> bool:
         payload = self._build_upload_payload(match)
         try:

@@ -46,11 +46,17 @@ class UpdatesConfig:
 
 
 @dataclass
+class HeartbeatConfig:
+    interval_seconds: int = 60
+
+
+@dataclass
 class AppConfig:
     server: ServerConfig = field(default_factory=ServerConfig)
     agent: AgentConfig = field(default_factory=AgentConfig)
     mtgo: MtgoConfig = field(default_factory=MtgoConfig)
     updates: UpdatesConfig = field(default_factory=UpdatesConfig)
+    heartbeat: HeartbeatConfig = field(default_factory=HeartbeatConfig)
 
 
 def _config_dir() -> Path:
@@ -94,6 +100,7 @@ def _parse_toml(path: Path) -> AppConfig:
     agent_raw = data.get("agent", {}) or {}
     mtgo_raw = data.get("mtgo", {}) or {}
     updates_raw = data.get("updates", {}) or {}
+    heartbeat_raw = data.get("heartbeat", {}) or {}
 
     return AppConfig(
         server=ServerConfig(
@@ -110,6 +117,9 @@ def _parse_toml(path: Path) -> AppConfig:
             check_interval_hours=int(updates_raw.get("check_interval_hours", 1)),
             include_prereleases=bool(updates_raw.get("include_prereleases", False)),
             github_token=updates_raw.get("github_token", ""),
+        ),
+        heartbeat=HeartbeatConfig(
+            interval_seconds=int(heartbeat_raw.get("interval_seconds", 60)),
         ),
     )
 
@@ -149,6 +159,9 @@ def _serialize(config: AppConfig) -> str:
         f"check_interval_hours = {int(config.updates.check_interval_hours)}",
         f"include_prereleases = {'true' if config.updates.include_prereleases else 'false'}",
         f'github_token = "{_toml_escape(config.updates.github_token)}"',
+        "",
+        "[heartbeat]",
+        f"interval_seconds = {int(config.heartbeat.interval_seconds)}",
         "",
     ]
     return "\n".join(lines)
