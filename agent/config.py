@@ -1,7 +1,7 @@
 """Agent config — load/save to a platform-appropriate location.
 
-On Windows: %APPDATA%\\MTGOMatchTracker\\config.toml
-On other platforms (dev/CI): ~/.config/mtgo-match-tracker/config.toml
+On Windows: %APPDATA%\\Manalog\\config.toml
+On other platforms (dev/CI): ~/.config/manalog/config.toml
 
 Writes are atomic (.tmp then rename). Never store user passwords — only
 the api_token issued by the server at registration time.
@@ -16,8 +16,8 @@ from pathlib import Path
 
 
 CONFIG_FILENAME = "config.toml"
-APP_DIR_NAME_WIN = "MTGOMatchTracker"
-APP_DIR_NAME_POSIX = "mtgo-match-tracker"
+APP_DIR_NAME_WIN = "Manalog"
+APP_DIR_NAME_POSIX = "manalog"
 
 
 @dataclass
