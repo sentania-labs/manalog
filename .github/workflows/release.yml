@@ -121,14 +121,10 @@ jobs:
           pip install pyinstaller
 
       - name: Build exe
-        run: pyinstaller --onefile --windowed --name MTGOMatchTracker agent/main.py
+        run: pyinstaller --onefile --windowed --name Manalog agent/main.py
 
       - name: Generate checksum
-        run: certutil -hashfile dist\MTGOMatchTracker.exe SHA256 > dist\MTGOMatchTracker.exe.sha256
-
-      - name: Rename exe for WiX (MTGOMatchTracker.exe -> Manalog.exe)
-        run: Copy-Item dist\MTGOMatchTracker.exe dist\Manalog.exe
-        shell: pwsh
+        run: certutil -hashfile dist\Manalog.exe SHA256 > dist\Manalog.exe.sha256
 
       - name: Install WiX v5 (pinned — v7 requires OSMF EULA)
         run: dotnet tool install --global wix --version 5.0.2
@@ -142,8 +138,8 @@ jobs:
         with:
           name: windows-agent-release
           path: |
-            dist/MTGOMatchTracker.exe
-            dist/MTGOMatchTracker.exe.sha256
+            dist/Manalog.exe
+            dist/Manalog.exe.sha256
             installer/dist/Manalog.msi
             installer/dist/Manalog.msi.sha256
           retention-days: 1
@@ -169,7 +165,7 @@ jobs:
           generate_release_notes: true
           tag_name: ${{ github.ref_name }}
           files: |
-            dist/MTGOMatchTracker.exe
-            dist/MTGOMatchTracker.exe.sha256
+            dist/Manalog.exe
+            dist/Manalog.exe.sha256
             installer/dist/Manalog.msi
             installer/dist/Manalog.msi.sha256

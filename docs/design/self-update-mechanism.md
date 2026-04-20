@@ -15,15 +15,15 @@ avoid anonymous rate limits.
 
 The release must carry two assets named exactly:
 
-- `MTGOMatchTracker.exe` — the new binary
-- `MTGOMatchTracker.exe.sha256` — plaintext SHA256 of the exe
+- `Manalog.exe` — the new binary
+- `Manalog.exe.sha256` — plaintext SHA256 of the exe
 
 Both are produced by the `release.yml` workflow on tag push.
 
 ## Integrity check
 
 `download_and_verify()` downloads the exe to
-`%TEMP%\MTGOMatchTracker_update.exe`, fetches the companion
+`%TEMP%\Manalog_update.exe`, fetches the companion
 `.sha256` asset, and compares a fresh SHA256 of the downloaded file
 against the published value. On mismatch the downloaded file is
 deleted and the function returns `None` — the old agent keeps running

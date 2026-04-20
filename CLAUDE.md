@@ -110,7 +110,7 @@ mtgo-match-tracker/
 │   ├── parser.py         # .dat / plaintext log parser (stub with extension points)
 │   ├── sender.py         # API client (httpx, HTTPS, bearer auth)
 │   ├── updater.py        # Self-update via GitHub Releases
-│   ├── config.py         # Config load/save (%APPDATA%\MTGOMatchTracker\config.toml)
+│   ├── config.py         # Config load/save (%APPDATA%\Manalog\config.toml)
 │   ├── assets/           # icon.ico for PyInstaller + tray
 │   ├── requirements.txt  # pystray, Pillow, watchdog, httpx, semver, pyinstaller
 │   └── main.py           # Agent entry point
@@ -304,13 +304,13 @@ agent/
 ├── parser.py        # .dat / plaintext log parser (stub; see below)
 ├── sender.py        # httpx async client, bearer auth, TLS
 ├── updater.py       # GitHub Releases self-update
-├── config.py        # Config load/save to %APPDATA%\MTGOMatchTracker\config.toml
+├── config.py        # Config load/save to %APPDATA%\Manalog\config.toml
 └── requirements.txt # pystray, Pillow, watchdog, httpx, tomli/tomllib, semver, pyinstaller
 ```
 
 ### Config file
 
-Location: `%APPDATA%\MTGOMatchTracker\config.toml`
+Location: `%APPDATA%\Manalog\config.toml`
 
 ```toml
 [server]
@@ -382,8 +382,8 @@ The exact `.dat` binary format is not yet reverse-engineered. The parser is a **
 
 1. On startup and every `check_interval_hours`, fetch `https://api.github.com/repos/sentania-labs/mtgo-match-tracker/releases/latest` (auth header if `github_token` set).
 2. Compare latest tag semver against `__version__` (baked in by PyInstaller build).
-3. If newer: download the `MTGOMatchTracker.exe` release asset, verify SHA256 against `MTGOMatchTracker.exe.sha256` asset.
-4. Write new exe to `%TEMP%\MTGOMatchTracker_update.exe`.
+3. If newer: download the `Manalog.exe` release asset, verify SHA256 against `Manalog.exe.sha256` asset.
+4. Write new exe to `%TEMP%\Manalog_update.exe`.
 5. Show tray notification "Update available — restart to apply." Tray menu gains "Restart to Update" item.
 6. On user confirmation: `subprocess.Popen([new_exe])` then `sys.exit(0)`. The new exe launches, replaces the old file in place.
 
@@ -404,7 +404,7 @@ If checksum fails: discard download, log error, notify user.
 pyinstaller \
   --onefile \
   --windowed \          # no console window on Windows
-  --name MTGOMatchTracker \
+  --name Manalog \
   --icon agent/assets/icon.ico \
   agent/main.py
 ```
