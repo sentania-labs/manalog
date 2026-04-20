@@ -78,10 +78,10 @@ docker compose exec db psql -U mtgo mtgo_tracker -c \
 
 ## 5. Agent
 
-Grab the latest `MTGOMatchTracker.exe` from GitHub Releases on a
+Grab the latest `Manalog.exe` from GitHub Releases on a
 Windows box. On first launch the tray icon prompts for server URL,
 username, password. Config lives in
-`%APPDATA%\MTGOMatchTracker\config.toml`.
+`%APPDATA%\Manalog\config.toml`.
 
 Verify the heartbeat is landing:
 

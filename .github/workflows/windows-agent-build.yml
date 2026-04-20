@@ -26,13 +26,13 @@ jobs:
           pip install pyinstaller
 
       - name: Build exe
-        run: pyinstaller --onefile --windowed --name MTGOMatchTracker agent/main.py
+        run: pyinstaller --onefile --windowed --name Manalog agent/main.py
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: windows-agent
-          path: dist/MTGOMatchTracker.exe
+          path: dist/Manalog.exe
           retention-days: 30
 
   build-msi:
@@ -47,10 +47,6 @@ jobs:
         with:
           name: windows-agent
           path: dist/
-
-      - name: Rename exe for WiX (MTGOMatchTracker.exe -> Manalog.exe)
-        run: Copy-Item dist\MTGOMatchTracker.exe dist\Manalog.exe
-        shell: pwsh
 
       - name: Install WiX v5 (pinned — v7 requires OSMF EULA)
         run: dotnet tool install --global wix --version 5.0.2

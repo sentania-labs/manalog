@@ -31,7 +31,7 @@ def test_check_updates_stages_after_successful_download(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     app = _tray()
-    staged_exe = tmp_path / "MTGOMatchTracker_update.exe"
+    staged_exe = tmp_path / "Manalog_update.exe"
     staged_exe.write_bytes(b"new")
 
     async def _check(cfg: AppConfig) -> tuple[str, str]:
