@@ -52,8 +52,8 @@ jobs:
         run: Copy-Item dist\MTGOMatchTracker.exe dist\Manalog.exe
         shell: pwsh
 
-      - name: Install WiX v4
-        run: dotnet tool install --global wix
+      - name: Install WiX v5 (pinned — v7 requires OSMF EULA)
+        run: dotnet tool install --global wix --version 5.0.2
 
       - name: Build MSI
         run: .\installer\build.ps1 -SourceDir dist -OutputDir installer\dist
