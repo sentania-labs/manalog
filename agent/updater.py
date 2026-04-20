@@ -26,10 +26,10 @@ from agent.config import AppConfig
 
 logger = logging.getLogger(__name__)
 
-REPO = "sentania-labs/mtgo-match-tracker"
+REPO = "sentania-labs/manalog"
 API_LATEST = f"https://api.github.com/repos/{REPO}/releases/latest"
-ASSET_EXE = "MTGOMatchTracker.exe"
-ASSET_SHA = "MTGOMatchTracker.exe.sha256"
+ASSET_EXE = "Manalog.exe"
+ASSET_SHA = "Manalog.exe.sha256"
 
 
 def current_version() -> str:
@@ -97,7 +97,7 @@ def _expected_sha_url(exe_url: str) -> str:
 
 
 async def download_and_verify(url: str, token: str | None) -> Path | None:
-    dest = Path(tempfile.gettempdir()) / "MTGOMatchTracker_update.exe"
+    dest = Path(tempfile.gettempdir()) / "Manalog_update.exe"
     headers = _auth_headers(token)
 
     async with httpx.AsyncClient(timeout=None, follow_redirects=True) as client:
