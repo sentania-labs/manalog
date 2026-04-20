@@ -59,7 +59,7 @@ def _prompt_registration(config: AppConfig) -> AppConfig:
     root.withdraw()
     try:
         server_url = simpledialog.askstring(
-            "MTGO Match Tracker",
+            "Manalog",
             "Server URL:",
             initialvalue=config.server.url,
             parent=root,
@@ -67,12 +67,12 @@ def _prompt_registration(config: AppConfig) -> AppConfig:
         if not server_url:
             return config
         username = simpledialog.askstring(
-            "MTGO Match Tracker", "Username:", parent=root
+            "Manalog", "Username:", parent=root
         )
         if not username:
             return config
         password = simpledialog.askstring(
-            "MTGO Match Tracker", "Password:", show="*", parent=root
+            "Manalog", "Password:", show="*", parent=root
         )
         if password is None:
             return config
@@ -101,7 +101,7 @@ def _prompt_registration(config: AppConfig) -> AppConfig:
         config.agent.api_token = api_token
         save_config(config)
         messagebox.showinfo(
-            "MTGO Match Tracker",
+            "Manalog",
             f"Registered as agent {agent_id}",
             parent=root,
         )
@@ -113,7 +113,7 @@ def _prompt_registration(config: AppConfig) -> AppConfig:
 def main() -> None:
     log_file = _default_log_file()
     _configure_logging(log_file)
-    logger.info("Starting MTGO Match Tracker agent")
+    logger.info("Starting Manalog agent")
 
     config = load_config()
     if _needs_registration(config):
