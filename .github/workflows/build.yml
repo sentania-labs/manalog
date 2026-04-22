@@ -149,7 +149,15 @@ jobs:
           EOF
 
       - name: Pre-cleanup (remove any stale stack from prior runs)
-        run: docker compose down -v --remove-orphans 2>/dev/null || true
+        run: |
+          docker compose down -v --remove-orphans --timeout 30 2>/dev/null || true
+          # The compose volumes declare explicit global names (`name: manalog-db`
+          # etc.), so they're not project-scoped and can survive `down -v` when
+          # a prior run left containers holding them (self-hosted runner state
+          # persists across jobs). A stale `manalog-db` keeps the old postgres
+          # password since initdb only runs on an empty data dir — auth then
+          # fails with this run's DB_PASSWORD. Force-remove before bring-up.
+          docker volume rm -f manalog-db manalog-certs manalog-caddy-data manalog-caddy-config 2>/dev/null || true
 
       - name: Bring up stack
         run: |
@@ -172,7 +180,11 @@ jobs:
 
       - name: Tear down
         if: always()
-        run: docker compose down -v
+        run: |
+          docker compose down -v --remove-orphans --timeout 30 || true
+          # Mirror the pre-cleanup: remove globally-named volumes explicitly so
+          # the next run on this runner starts with a clean postgres data dir.
+          docker volume rm -f manalog-db manalog-certs manalog-caddy-data manalog-caddy-config || true
 
       - name: Cleanup smoke images
         if: always()
