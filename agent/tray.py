@@ -17,6 +17,8 @@ from enum import Enum
 from pathlib import Path
 from typing import Any
 
+from agent import __version__
+from agent.about_window import AboutWindow
 from agent.config import AppConfig, ConfigLoadError, load_config
 from agent.log_viewer import LogViewerWindow
 from agent.parser import ParsedMatch
@@ -102,6 +104,7 @@ class TrayApp:
         self._sender_loop_thread: threading.Thread | None = None
         self._settings_window: SettingsWindow | None = None
         self._log_viewer: LogViewerWindow | None = None
+        self._about_window: AboutWindow | None = None
 
     # ---- lifecycle -----------------------------------------------------
 
@@ -113,7 +116,9 @@ class TrayApp:
         assets_dir = Path(__file__).parent / "assets"
         icon_image = _load_icon(assets_dir)
         menu = self._build_menu()
-        self._icon = pystray.Icon("manalog", icon_image, "Manalog", menu)
+        self._icon = pystray.Icon(
+            "manalog", icon_image, f"Manalog v{__version__}", menu
+        )
 
         self._start_sender_loop()
         self._start_watcher()
@@ -355,6 +360,7 @@ class TrayApp:
             MenuItem("Reload Config", self._on_reload_config),
             MenuItem("Open Log", self._on_open_log),
             Menu.SEPARATOR,
+            MenuItem("About", self._on_about),
             MenuItem("Quit", self._on_quit),
         )
 
@@ -438,6 +444,14 @@ class TrayApp:
         viewer = LogViewerWindow(self._log_file)
         self._log_viewer = viewer
         viewer.show()
+
+    def _on_about(self, icon: Any, item: Any) -> None:
+        existing = self._about_window
+        if existing is not None and existing._thread is not None and existing._thread.is_alive():
+            return
+        window = AboutWindow(self._config)
+        self._about_window = window
+        window.show()
 
     def _on_quit(self, icon: Any, item: Any) -> None:
         self._stop.set()

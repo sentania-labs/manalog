@@ -16,6 +16,7 @@ from pathlib import Path
 
 import httpx
 
+from agent import __version__
 from agent.config import (
     AppConfig,
     ConfigLoadError,
@@ -252,7 +253,7 @@ def main() -> None:
 
     log_file = _default_log_file()
     _configure_logging(log_file)
-    logger.info("Starting Manalog agent")
+    logger.info("Manalog agent v%s starting", __version__)
 
     instance_lock = InstanceLock()
     if not instance_lock.acquire():

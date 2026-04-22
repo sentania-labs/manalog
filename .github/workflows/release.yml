@@ -120,6 +120,22 @@ jobs:
           pip install -r agent/requirements.txt
           pip install pyinstaller
 
+      - name: Bake version into agent/__init__.py
+        shell: pwsh
+        run: |
+          $version = $env:GITHUB_REF_NAME -replace '^v', ''
+          (Get-Content agent/__init__.py) -replace '__version__ = ".*"', "__version__ = '$version'" | Set-Content agent/__init__.py
+          Write-Host "Baked version: $version"
+          Get-Content agent/__init__.py
+
+      - name: Bake build date into agent/_build_date.py
+        shell: pwsh
+        run: |
+          $buildDate = Get-Date -Format yyyy-MM-dd
+          Set-Content agent/_build_date.py "BUILD_DATE = '$buildDate'`n"
+          Write-Host "Baked build date: $buildDate"
+          Get-Content agent/_build_date.py
+
       - name: Build exe
         run: pyinstaller --onefile --windowed --name Manalog agent/main.py
 
