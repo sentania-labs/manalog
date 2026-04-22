@@ -135,6 +135,92 @@ The `%PROGRAMDATA%\Manalog\` directory (config, logs) is preserved on uninstall.
 2. **Service vs. startup shortcut** — the current installer uses a Startup folder shortcut (per CLAUDE.md). If a Windows Service (headless, starts before login) is preferred, the `agent/windows-service-wrapper` branch adds `agent/service.py`; the installer would need a `ServiceInstall` element and elevated privilege grant. Revisit after beta.
 3. **WiX toolchain in CI** — WiX v4 is installed via `dotnet tool install --global wix` on `windows-latest`. If the team prefers a vendored/pinned version, lock with `--version <x.y.z>`.
 
+## Game-log archive
+
+Phase A of the agent ships every `.dat` / `.log` it sees to the server
+verbatim — no parsing. Parsing happens later, against the archive. The
+rationale is that parser improvements can reprocess any historical match
+without asking the user to re-export logs.
+
+### Server-side layout
+
+Files land on disk under `GAMELOG_ARCHIVE_ROOT` (env var, default
+`/data/manalog/gamelogs`):
+
+```
+/data/manalog/gamelogs/
+└── <manalog-username>/
+    └── <YYYY-MM>/
+        └── <sha256>.dat        # or .log
+```
+
+One row per unique sha256 in the `game_log_archive` table. The bytes
+themselves are on disk, not in Postgres. The DB row records who
+uploaded it, when it was captured (file mtime), file size, type, and
+the relative stored_path.
+
+### Endpoint
+
+```
+POST /api/v1/agent/gamelogs/upload
+```
+
+Multipart form: `file` (bytes) + `metadata` (JSON string with
+`original_name`, `file_type` ∈ {`dat`, `log`}, `captured_at` ISO8601,
+`size`, `sha256`). Requires the same bearer token as the existing
+agent endpoints. Returns `201 Created` on first-upload, `200 OK` on a
+sha-dedup hit; in both cases the body carries `upload_id`, `sha256`,
+`stored_path`, and `created` (boolean).
+
+### Configuration
+
+```
+GAMELOG_ARCHIVE_ROOT=/data/manalog/gamelogs
+```
+
+Add to `.env`. The app container must have write access to this path.
+For Docker deployments, mount a host directory or named volume at the
+configured path — e.g. a `manalog-gamelogs` named volume in
+`docker-compose.yml` (or a bind mount onto a NAS-backed directory).
+
+### Backup
+
+Everything the server retains for archival purposes lives under this
+one directory. `rsync -a --delete /data/manalog/gamelogs/ backup-host:/…`
+is sufficient. Pair with a nightly `pg_dump` of Postgres — that covers
+the index row referencing each stored file.
+
+### Agent state DB
+
+The Phase A shipper keeps its own local sqlite at:
+
+- Windows: `%APPDATA%\Manalog\upload_state.db`
+- Linux (dev): `~/.config/manalog/upload_state.db`
+
+Schema:
+
+```sql
+CREATE TABLE uploaded_files (
+  sha256           TEXT PRIMARY KEY,
+  original_path    TEXT NOT NULL,
+  uploaded_at      TEXT NOT NULL,
+  server_upload_id INTEGER,
+  status           TEXT NOT NULL  -- 'uploaded' | 'pending' | 'failed'
+);
+```
+
+Inspect via `sqlite3 upload_state.db 'SELECT * FROM uploaded_files;'`.
+Safe to delete: the server will dedup on sha256, so worst-case the
+agent re-uploads everything on next run and the server returns 200s.
+
+### Single-instance guard
+
+When both the Windows service and the tray shortcut are installed,
+only one is allowed to run. The first to acquire
+`%LOCALAPPDATA%\Manalog\instance.lock` (PID file with stale detection)
+wins; the second logs and exits cleanly. The service starts before
+login and normally holds the lock.
+
 ## Troubleshooting
 
 - **Healthz returns 503 with `db: unreachable`**: the app can't reach

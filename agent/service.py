@@ -54,9 +54,19 @@ class ManalogAgentService(win32serviceutil.ServiceFramework if HAS_WIN32 else ob
     def _run_headless(self):
         """Run the watchdog + sender loop without tray/GUI."""
         import asyncio
+        import logging
+
         from agent.config import load_config
+        from agent.instance_lock import InstanceLock
         from agent.sender import AgentSender
         from agent.watcher import MTGOWatcher
+
+        instance_lock = InstanceLock()
+        if not instance_lock.acquire():
+            logging.getLogger(__name__).info(
+                "ManalogAgent service: another instance holds the lock — exiting."
+            )
+            return
 
         config = load_config()
         client = AgentSender(config)
@@ -69,37 +79,39 @@ class ManalogAgentService(win32serviceutil.ServiceFramework if HAS_WIN32 else ob
             from pathlib import Path
             log_dir = Path(config.mtgo.log_dir)
 
-        if log_dir and log_dir.exists():
-            watcher = MTGOWatcher(log_dir, on_match)
-            watcher.start()
-            try:
+        try:
+            if log_dir and log_dir.exists():
+                watcher = MTGOWatcher(log_dir, on_match)
+                watcher.start()
+                try:
+                    while self._running:
+                        if HAS_WIN32:
+                            import win32event as _we
+                            result = _we.WaitForSingleObject(self._stop_event, 5000)
+                            if result == 0:  # WAIT_OBJECT_0
+                                break
+                        else:
+                            import time
+                            time.sleep(5)
+                            if not self._running:
+                                break
+                finally:
+                    watcher.stop()
+            else:
+                logging.getLogger(__name__).warning(
+                    "ManalogAgent service: no MTGO log_dir configured or dir missing; watcher idle"
+                )
                 while self._running:
                     if HAS_WIN32:
                         import win32event as _we
-                        result = _we.WaitForSingleObject(self._stop_event, 5000)
-                        if result == 0:  # WAIT_OBJECT_0
+                        result = _we.WaitForSingleObject(self._stop_event, 30000)
+                        if result == 0:
                             break
                     else:
                         import time
-                        time.sleep(5)
-                        if not self._running:
-                            break
-            finally:
-                watcher.stop()
-        else:
-            import logging
-            logging.getLogger(__name__).warning(
-                "ManalogAgent service: no MTGO log_dir configured or dir missing; watcher idle"
-            )
-            while self._running:
-                if HAS_WIN32:
-                    import win32event as _we
-                    result = _we.WaitForSingleObject(self._stop_event, 30000)
-                    if result == 0:
-                        break
-                else:
-                    import time
-                    time.sleep(30)
+                        time.sleep(30)
+        finally:
+            instance_lock.release()
 
 
 def run_service():
