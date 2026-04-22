@@ -12,6 +12,7 @@ import logging
 import subprocess
 import sys
 import threading
+import time
 import webbrowser
 from enum import Enum
 from pathlib import Path
@@ -105,6 +106,11 @@ class TrayApp:
         self._settings_window: SettingsWindow | None = None
         self._log_viewer: LogViewerWindow | None = None
         self._about_window: AboutWindow | None = None
+        # Central registry of open sub-windows so _on_quit can close them
+        # all. Each entry exposes a ``close()`` that schedules destroy on
+        # its own tkinter event loop.
+        self._sub_windows: list[Any] = []
+        self._sub_windows_lock = threading.Lock()
 
     # ---- lifecycle -----------------------------------------------------
 
@@ -401,12 +407,28 @@ class TrayApp:
             self._staged_update_tag = None
         self._refresh_menu()
 
+    def _register_sub_window(self, window: Any) -> None:
+        with self._sub_windows_lock:
+            self._sub_windows.append(window)
+
+    def _unregister_sub_window(self, window: Any) -> None:
+        with self._sub_windows_lock:
+            try:
+                self._sub_windows.remove(window)
+            except ValueError:
+                pass
+
     def _on_settings(self, icon: Any, item: Any) -> None:
         existing = self._settings_window
         if existing is not None and existing._thread is not None and existing._thread.is_alive():
             return
-        window = SettingsWindow(self._config, on_save=self.reload_config)
+        window = SettingsWindow(
+            self._config,
+            on_save=self.reload_config,
+            on_close=lambda: self._unregister_sub_window(window),
+        )
         self._settings_window = window
+        self._register_sub_window(window)
         window.show()
 
     def _on_reload_config(self, icon: Any, item: Any) -> None:
@@ -441,21 +463,30 @@ class TrayApp:
         existing = self._log_viewer
         if existing is not None and existing._thread is not None and existing._thread.is_alive():
             return
-        viewer = LogViewerWindow(self._log_file)
+        viewer = LogViewerWindow(
+            self._log_file,
+            on_close=lambda: self._unregister_sub_window(viewer),
+        )
         self._log_viewer = viewer
+        self._register_sub_window(viewer)
         viewer.show()
 
     def _on_about(self, icon: Any, item: Any) -> None:
         existing = self._about_window
         if existing is not None and existing._thread is not None and existing._thread.is_alive():
             return
-        window = AboutWindow(self._config)
+        window = AboutWindow(
+            self._config,
+            on_close=lambda: self._unregister_sub_window(window),
+        )
         self._about_window = window
+        self._register_sub_window(window)
         window.show()
 
     def _on_quit(self, icon: Any, item: Any) -> None:
         self._stop.set()
         self._stop_watcher()
+        self._close_sub_windows()
         try:
             self._run_on_sender_loop(self._sender.close())
         except Exception:
@@ -464,6 +495,24 @@ class TrayApp:
         if self._icon is not None:
             self._icon.stop()
         sys.exit(0)
+
+    def _close_sub_windows(self, grace_seconds: float = 0.3) -> None:
+        """Close every registered sub-window.
+
+        ``close()`` schedules ``root.destroy`` on the window's own tkinter
+        loop — calling from this thread is safe because ``tk.after`` is
+        the cross-thread-safe handoff. A short grace period lets those
+        destroys actually land before the interpreter exits.
+        """
+        with self._sub_windows_lock:
+            windows = list(self._sub_windows)
+        for window in windows:
+            try:
+                window.close()
+            except Exception:
+                logger.exception("Error closing sub-window %r", window)
+        if windows:
+            time.sleep(grace_seconds)
 
     # ---- helpers -------------------------------------------------------
 

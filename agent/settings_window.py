@@ -65,10 +65,13 @@ class SettingsWindow:
         self,
         config: AppConfig,
         on_save: Callable[[], None],
+        on_close: Callable[[], None] | None = None,
     ) -> None:
         self._config = config
         self._on_save = on_save
+        self._on_close = on_close
         self._thread: threading.Thread | None = None
+        self._root: object | None = None
 
     def show(self) -> None:
         if self._thread is not None and self._thread.is_alive():
@@ -79,6 +82,16 @@ class SettingsWindow:
             daemon=True,
         )
         self._thread.start()
+
+    def close(self) -> None:
+        """Schedule ``root.destroy`` on the window's own tkinter loop."""
+        root = self._root
+        if root is None:
+            return
+        try:
+            root.after(0, root.destroy)  # type: ignore[attr-defined]
+        except Exception:
+            logger.exception("Failed to schedule settings window close")
 
     def _run(self) -> None:
         try:
@@ -91,6 +104,7 @@ class SettingsWindow:
         cfg = self._config
 
         root = tk.Tk()
+        self._root = root
         root.title("Manalog Settings")
         try:
             root.minsize(520, 0)
@@ -309,6 +323,13 @@ class SettingsWindow:
             root.mainloop()
         except Exception:
             logger.exception("Settings window mainloop raised")
+        finally:
+            self._root = None
+            if self._on_close is not None:
+                try:
+                    self._on_close()
+                except Exception:
+                    logger.exception("Settings window on_close callback raised")
 
 
 __all__ = ["SettingsWindow", "auto_detect_mtgo_log_dir", "normalize_server_url"]

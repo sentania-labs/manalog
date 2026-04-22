@@ -12,6 +12,7 @@ import os
 import subprocess
 import sys
 import threading
+from collections.abc import Callable
 from pathlib import Path
 
 
@@ -58,9 +59,15 @@ def filter_lines(content: str, level: str) -> str:
 class LogViewerWindow:
     """Tkinter log viewer, displayed in a dedicated thread."""
 
-    def __init__(self, log_file: Path | None) -> None:
+    def __init__(
+        self,
+        log_file: Path | None,
+        on_close: Callable[[], None] | None = None,
+    ) -> None:
         self._log_file = log_file
+        self._on_close = on_close
         self._thread: threading.Thread | None = None
+        self._root: object | None = None
 
     def show(self) -> None:
         if self._thread is not None and self._thread.is_alive():
@@ -71,6 +78,16 @@ class LogViewerWindow:
             daemon=True,
         )
         self._thread.start()
+
+    def close(self) -> None:
+        """Schedule ``root.destroy`` on the window's own tkinter loop."""
+        root = self._root
+        if root is None:
+            return
+        try:
+            root.after(0, root.destroy)  # type: ignore[attr-defined]
+        except Exception:
+            logger.exception("Failed to schedule log viewer close")
 
     def _run(self) -> None:
         try:
@@ -83,6 +100,7 @@ class LogViewerWindow:
         log_path = self._log_file
 
         root = tk.Tk()
+        self._root = root
         root.title("Manalog Log Viewer")
         try:
             root.geometry("800x500")
@@ -204,6 +222,13 @@ class LogViewerWindow:
             root.mainloop()
         except Exception:
             logger.exception("Log viewer mainloop raised")
+        finally:
+            self._root = None
+            if self._on_close is not None:
+                try:
+                    self._on_close()
+                except Exception:
+                    logger.exception("Log viewer on_close callback raised")
 
 
 __all__ = ["LogViewerWindow", "filter_lines"]

@@ -27,6 +27,11 @@
          %APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup -->
     <StandardDirectory Id="StartupFolder" />
 
+    <!-- Start Menu program folder — Manalog subfolder -->
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Directory Id="ManalogMenuFolder" Name="Manalog" />
+    </StandardDirectory>
+
     <ComponentGroup Id="ProductComponents" Directory="INSTALLFOLDER">
       <Component Id="ManalogExe" Guid="efbd6886-dd05-4b27-9771-b0bdf60e2e76">
         <File Id="ManalogExe" Source="$(var.SourceDir)\Manalog.exe" KeyPath="yes" />
@@ -46,6 +51,21 @@
       <Component Id="ProgramDataDir" Directory="PROGRAMDATAFOLDER" Guid="a197b1e6-f535-443c-939a-6141acb81968">
         <CreateFolder />
         <!-- Preserve on uninstall: no RemoveFolder element -->
+      </Component>
+      <Component Id="StartMenuShortcut" Directory="ManalogMenuFolder" Guid="ec7e7b07-840e-418f-8b8e-8fd8746c8d1b">
+        <Shortcut
+          Id="StartMenuSC"
+          Name="Manalog"
+          Target="[INSTALLFOLDER]Manalog.exe"
+          WorkingDirectory="INSTALLFOLDER" />
+        <RemoveFolder Id="RemoveManalogMenuFolder" Directory="ManalogMenuFolder" On="uninstall" />
+        <RegistryValue
+          Root="HKCU"
+          Key="Software\Manalog"
+          Name="StartMenuInstalled"
+          Type="integer"
+          Value="1"
+          KeyPath="yes" />
       </Component>
     </ComponentGroup>
 

@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import logging
 import threading
+from collections.abc import Callable
 
 from agent import __version__
 from agent.config import AppConfig
@@ -26,9 +27,15 @@ def _resolve_build_date() -> str:
 class AboutWindow:
     """Tkinter About dialog, displayed in a dedicated thread."""
 
-    def __init__(self, config: AppConfig) -> None:
+    def __init__(
+        self,
+        config: AppConfig,
+        on_close: Callable[[], None] | None = None,
+    ) -> None:
         self._config = config
+        self._on_close = on_close
         self._thread: threading.Thread | None = None
+        self._root: object | None = None
 
     def show(self) -> None:
         if self._thread is not None and self._thread.is_alive():
@@ -39,6 +46,16 @@ class AboutWindow:
             daemon=True,
         )
         self._thread.start()
+
+    def close(self) -> None:
+        """Schedule ``root.destroy`` on the window's own tkinter loop."""
+        root = self._root
+        if root is None:
+            return
+        try:
+            root.after(0, root.destroy)  # type: ignore[attr-defined]
+        except Exception:
+            logger.exception("Failed to schedule about window close")
 
     def _run(self) -> None:
         try:
@@ -53,6 +70,7 @@ class AboutWindow:
         agent_id = cfg.agent.agent_id or "Not registered"
 
         root = tk.Tk()
+        self._root = root
         root.title("About Manalog")
         try:
             root.resizable(False, False)
@@ -94,6 +112,13 @@ class AboutWindow:
             root.mainloop()
         except Exception:
             logger.exception("About window mainloop raised")
+        finally:
+            self._root = None
+            if self._on_close is not None:
+                try:
+                    self._on_close()
+                except Exception:
+                    logger.exception("About window on_close callback raised")
 
 
 __all__ = ["AboutWindow"]
