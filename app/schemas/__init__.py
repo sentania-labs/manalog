@@ -8,6 +8,7 @@ from app.schemas.archetype import ArchetypeCreate, ArchetypeRead
 from app.schemas.decklist import DecklistCreate, DecklistRead
 from app.schemas.draft import DraftCreate, DraftRead, PickCreate, PickRead
 from app.schemas.game import GameCreate, GameRead, PlayCreate, PlayRead
+from app.schemas.gamelog import GameLogUploadMetadata, GameLogUploadResponse
 from app.schemas.match import MatchCreate, MatchRead
 from app.schemas.user import UserCreate, UserRead
 
@@ -24,6 +25,8 @@ __all__ = [
     "DraftRead",
     "GameCreate",
     "GameRead",
+    "GameLogUploadMetadata",
+    "GameLogUploadResponse",
     "MatchCreate",
     "MatchRead",
     "PickCreate",

@@ -15,6 +15,7 @@ from app.api import (
     archetypes,
     decklists,
     drafts,
+    gamelogs,
     games,
     matches,
     stats,
@@ -62,6 +63,7 @@ async def healthz(response: Response) -> dict:
 
 for router in (
     agent.router,
+    gamelogs.router,
     matches.router,
     games.router,
     decklists.router,

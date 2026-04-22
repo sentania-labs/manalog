@@ -14,6 +14,8 @@ import sys
 from pathlib import Path
 
 from agent.config import AppConfig, get_config_path, load_config, save_config
+from agent.instance_lock import InstanceLock
+from agent.raw_shipper import RawShipper
 from agent.sender import AgentSender
 from agent.tray import TrayApp
 
@@ -129,19 +131,32 @@ def main() -> None:
     _configure_logging(log_file)
     logger.info("Starting Manalog agent")
 
+    instance_lock = InstanceLock()
+    if not instance_lock.acquire():
+        logger.info("Another Manalog instance is already running — exiting.")
+        sys.exit(0)
+
     config = load_config()
     if _needs_registration(config):
         config = _prompt_registration(config)
 
     sender = AgentSender(config)
+    watched_dir = Path(config.mtgo.log_dir) if config.mtgo.log_dir else None
+    raw_shipper = RawShipper(config, watched_dir=watched_dir)
+    raw_shipper.start()
     app = TrayApp(config, sender, log_file=log_file)
     try:
         app.run()
     finally:
         try:
+            raw_shipper.stop()
+        except Exception:
+            logger.exception("Error stopping raw_shipper")
+        try:
             asyncio.run(sender.close())
         except Exception:
             logger.exception("Error closing sender")
+        instance_lock.release()
 
 
 if __name__ == "__main__":

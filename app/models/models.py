@@ -10,7 +10,9 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import (
+    BigInteger,
     Boolean,
+    CHAR,
     DateTime,
     ForeignKey,
     Integer,
@@ -235,6 +237,37 @@ class Draft(Base):
 
     user: Mapped[User] = relationship(back_populates="drafts")
     picks: Mapped[list["Pick"]] = relationship(back_populates="draft", cascade="all, delete-orphan")
+
+
+class GameLogArchive(Base):
+    """Raw MTGO game-log bytes archived verbatim (Phase A capture-now hoard).
+
+    One row per unique sha256; the bytes themselves are on disk at
+    GAMELOG_ARCHIVE_ROOT, not in the DB. Parsing lives elsewhere —
+    this table only tracks that we have the bytes.
+    """
+    __tablename__ = "game_log_archive"
+
+    id: Mapped[int] = mapped_column(
+        BigInteger().with_variant(Integer, "sqlite"),
+        primary_key=True,
+        autoincrement=True,
+    )
+    uploaded_by_user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id"),
+        nullable=False,
+    )
+    captured_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    uploaded_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    file_type: Mapped[str] = mapped_column(String(16), nullable=False)
+    original_name: Mapped[str] = mapped_column(String(512), nullable=False)
+    size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
+    sha256: Mapped[str] = mapped_column(CHAR(64), nullable=False, unique=True)
+    stored_path: Mapped[str] = mapped_column(Text, nullable=False)
+    mtgo_username: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
 
 class Pick(Base):
