@@ -48,6 +48,9 @@ services:
       ADMIN_USERNAME: ${ADMIN_USERNAME:-}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
       ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@localhost}
+      GAMELOG_ARCHIVE_ROOT: ${GAMELOG_ARCHIVE_ROOT:-/data/manalog/gamelogs}
+    volumes:
+      - manalog-gamelogs:/data/manalog/gamelogs
     depends_on:
       db:
         condition: service_healthy
@@ -81,3 +84,5 @@ volumes:
     name: manalog-caddy-data
   caddy-config:
     name: manalog-caddy-config
+  manalog-gamelogs:
+    name: manalog-gamelogs
