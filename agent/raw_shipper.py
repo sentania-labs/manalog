@@ -215,19 +215,23 @@ class RawShipper:
     async def _startup_scan(self) -> None:
         if self._watched_dir is None or not self._watched_dir.exists():
             return
+        count = 0
         for suffix in WATCHED_SUFFIXES:
             for path in self._watched_dir.rglob(f"*{suffix}"):
                 if not path.is_file():
                     continue
                 self._queue.put(path)
+                count += 1
+        logger.info(
+            "raw_shipper: startup scan queued %d file(s) from %s",
+            count,
+            self._watched_dir,
+        )
 
     # ---- per-file workflow -------------------------------------------
 
     async def _process_path(self, client: httpx.AsyncClient, path: Path) -> None:
         if not path.is_file():
-            return
-
-        if not await self._wait_until_stable(path):
             return
 
         try:
@@ -237,6 +241,12 @@ class RawShipper:
             return
 
         if self._already_uploaded(sha):
+            logger.debug(
+                "raw_shipper: skip %s already uploaded (sha=%s)", path.name, sha[:8]
+            )
+            return
+
+        if not await self._wait_until_stable(path):
             return
 
         try:
@@ -259,6 +269,7 @@ class RawShipper:
         await self._upload_with_retry(client, path, sha, data, metadata)
 
     async def _wait_until_stable(self, path: Path) -> bool:
+        logger.info("raw_shipper: waiting for %s to stabilize", path.name)
         try:
             prev = path.stat()
         except OSError:
