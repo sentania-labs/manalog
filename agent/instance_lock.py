@@ -82,33 +82,72 @@ class InstanceLock:
     def acquire(self) -> bool:
         self._path.parent.mkdir(parents=True, exist_ok=True)
 
-        if self._path.exists():
+        # Try atomic create-exclusive twice: first attempt wins outright, or
+        # collides with an existing holder. On collision, inspect the PID; if
+        # stale, unlink and retry once under O_EXCL so two racers cannot both
+        # take over a stale lock. A live holder ends the attempt.
+        for attempt in range(2):
             try:
-                existing = self._path.read_text(encoding="utf-8").strip()
-                existing_pid = int(existing) if existing else 0
-            except (OSError, ValueError):
-                existing_pid = 0
+                fd = os.open(
+                    str(self._path),
+                    os.O_CREAT | os.O_EXCL | os.O_WRONLY,
+                    0o644,
+                )
+            except FileExistsError:
+                try:
+                    existing = self._path.read_text(encoding="utf-8").strip()
+                    existing_pid = int(existing) if existing else 0
+                except (OSError, ValueError):
+                    existing_pid = 0
 
-            if existing_pid and _pid_running(existing_pid):
+                if existing_pid and _pid_running(existing_pid):
+                    logger.info(
+                        "Instance lock held by PID %d (%s); not acquiring",
+                        existing_pid,
+                        self._path,
+                    )
+                    return False
+
+                if attempt == 0:
+                    logger.info(
+                        "Stale instance lock at %s (PID %d not running) — taking over",
+                        self._path,
+                        existing_pid,
+                    )
+                    try:
+                        self._path.unlink()
+                    except FileNotFoundError:
+                        pass
+                    except OSError:
+                        logger.exception(
+                            "Failed to clear stale lock at %s", self._path
+                        )
+                        return False
+                    continue
+                # Second collision: another racer grabbed the stale slot first.
                 logger.info(
-                    "Instance lock held by PID %d (%s); not acquiring",
-                    existing_pid,
+                    "Instance lock at %s taken over by another process mid-acquire; not acquiring",
                     self._path,
                 )
                 return False
-            logger.info(
-                "Stale instance lock at %s (PID %d not running) — taking over",
-                self._path,
-                existing_pid,
-            )
+            except OSError:
+                logger.exception("Failed to create instance lock at %s", self._path)
+                return False
 
-        try:
-            self._path.write_text(str(os.getpid()), encoding="utf-8")
-        except OSError:
-            logger.exception("Failed to write instance lock at %s", self._path)
-            return False
-        self._acquired = True
-        return True
+            try:
+                with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                    fh.write(str(os.getpid()))
+            except OSError:
+                logger.exception("Failed to write PID to instance lock at %s", self._path)
+                try:
+                    self._path.unlink()
+                except OSError:
+                    pass
+                return False
+            self._acquired = True
+            return True
+
+        return False
 
     def release(self) -> None:
         if not self._acquired:

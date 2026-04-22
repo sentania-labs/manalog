@@ -22,6 +22,7 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, Form, HTTPException, Response, UploadFile, status
 from pydantic import ValidationError
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_agent
@@ -163,8 +164,38 @@ async def upload_gamelog(
     agent.last_seen = datetime.now(timezone.utc)
     try:
         await session.commit()
+    except IntegrityError:
+        # Another request won the race and already inserted this sha256.
+        # The file on disk is keyed by sha256 and is identical content, so
+        # we leave it in place (the winner's row references the same path)
+        # and return the existing row idempotently.
+        await session.rollback()
+        logger.info(
+            "Concurrent upload of sha %s lost unique-constraint race; returning existing row",
+            meta.sha256,
+        )
+        existing = await session.execute(
+            select(GameLogArchive).where(GameLogArchive.sha256 == meta.sha256)
+        )
+        row = existing.scalar_one_or_none()
+        if row is None:
+            # Constraint fired but no row visible — should not happen; surface it.
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="integrity error with no existing row",
+            )
+        agent.last_seen = datetime.now(timezone.utc)
+        await session.commit()
+        response.status_code = status.HTTP_200_OK
+        return GameLogUploadResponse(
+            upload_id=row.id,
+            sha256=row.sha256,
+            stored_path=row.stored_path,
+            created=False,
+        )
     except Exception:
-        # File is on disk but DB insert failed — remove the orphan.
+        # Non-integrity commit failure: the file we just wrote is an orphan
+        # (no row references it, and the sha is unique to this attempt).
         logger.exception("DB insert failed for gamelog %s; removing file", meta.sha256)
         try:
             absolute.unlink()
