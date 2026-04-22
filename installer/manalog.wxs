@@ -23,12 +23,9 @@
       <Directory Id="PROGRAMDATAFOLDER" Name="Manalog" />
     </StandardDirectory>
 
-    <!-- Startup shortcut dir -->
-    <StandardDirectory Id="AppDataFolder">
-      <Directory Id="Programs" Name="Programs">
-        <Directory Id="Startup" Name="Startup" />
-      </Directory>
-    </StandardDirectory>
+    <!-- Startup shortcut dir — resolves to
+         %APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup -->
+    <StandardDirectory Id="StartupFolder" />
 
     <ComponentGroup Id="ProductComponents" Directory="INSTALLFOLDER">
       <Component Id="ManalogExe" Guid="efbd6886-dd05-4b27-9771-b0bdf60e2e76">
@@ -41,7 +38,7 @@
           Value="[INSTALLFOLDER]" />
         <Shortcut
           Id="StartupShortcut"
-          Directory="Startup"
+          Directory="StartupFolder"
           Name="Manalog"
           Target="[INSTALLFOLDER]Manalog.exe"
           WorkingDirectory="INSTALLFOLDER" />

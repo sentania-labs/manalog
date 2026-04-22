@@ -124,13 +124,16 @@ jobs:
         run: pyinstaller --onefile --windowed --name Manalog agent/main.py
 
       - name: Generate checksum
-        run: certutil -hashfile dist\Manalog.exe SHA256 > dist\Manalog.exe.sha256
+        run: |
+          (Get-FileHash dist\Manalog.exe -Algorithm SHA256).Hash.ToLower() `
+            | Out-File -NoNewline -Encoding ASCII dist\Manalog.exe.sha256
+        shell: pwsh
 
       - name: Install WiX v5 (pinned — v7 requires OSMF EULA)
         run: dotnet tool install --global wix --version 5.0.2
 
       - name: Build MSI
-        run: .\installer\build.ps1 -SourceDir dist -OutputDir installer\dist
+        run: .\installer\build.ps1 -SourceDir dist -OutputDir installer\dist -Arch x64
         shell: pwsh
 
       - name: Upload artifact for release job
@@ -158,6 +161,15 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: windows-agent-release
+          path: .
+
+      - name: Verify release assets exist at expected paths
+        run: |
+          set -euo pipefail
+          for f in dist/Manalog.exe dist/Manalog.exe.sha256 \
+                   installer/dist/Manalog.msi installer/dist/Manalog.msi.sha256; do
+            test -s "$f" || { echo "missing/empty: $f"; exit 1; }
+          done
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2

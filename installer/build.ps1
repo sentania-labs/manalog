@@ -23,7 +23,9 @@
 #>
 param(
     [string]$SourceDir = "dist",
-    [string]$OutputDir = "installer\dist"
+    [string]$OutputDir = "installer\dist",
+    [ValidateSet("x64", "x86", "arm64")]
+    [string]$Arch = "x64"
 )
 
 Set-StrictMode -Version Latest
@@ -38,10 +40,12 @@ New-Item -ItemType Directory -Force -Path $OutputDir | Out-Null
 
 Write-Host "Building MSI from $WxsFile ..."
 Write-Host "Source dir: $SourceDir"
+Write-Host "Arch: $Arch"
 Write-Host "Output: $OutMsi"
 
 # Build using wix CLI (dotnet tool)
 wix build $WxsFile `
+    -arch $Arch `
     -d "SourceDir=$SourceDir" `
     -o $OutMsi
 

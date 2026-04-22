@@ -84,6 +84,12 @@ class TrayApp:
         self._staged_update: Path | None = None
         self._staged_update_tag: str | None = None
         self._staged_lock = threading.Lock()
+        # Dedicated loop for sender operations (heartbeat + upload + close).
+        # httpx.AsyncClient binds its connection pool to the first loop that
+        # uses it; routing every sender coroutine through a single persistent
+        # loop avoids "Event loop is closed" on subsequent calls.
+        self._sender_loop: asyncio.AbstractEventLoop | None = None
+        self._sender_loop_thread: threading.Thread | None = None
 
     # ---- lifecycle -----------------------------------------------------
 
@@ -97,10 +103,55 @@ class TrayApp:
         menu = self._build_menu()
         self._icon = pystray.Icon("manalog", icon_image, "Manalog", menu)
 
+        self._start_sender_loop()
         self._start_watcher()
         self._start_heartbeat_loop()
         self._start_update_loop()
         self._icon.run()
+
+    # ---- sender loop ---------------------------------------------------
+
+    def _start_sender_loop(self) -> None:
+        ready = threading.Event()
+
+        def _runner() -> None:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            self._sender_loop = loop
+            ready.set()
+            try:
+                loop.run_forever()
+            finally:
+                try:
+                    loop.run_until_complete(loop.shutdown_asyncgens())
+                except Exception:
+                    logger.exception("Error shutting down async generators")
+                loop.close()
+
+        thread = threading.Thread(target=_runner, name="mtgo-sender-loop", daemon=True)
+        thread.start()
+        ready.wait(timeout=5.0)
+        self._sender_loop_thread = thread
+
+    def _run_on_sender_loop(self, coro: Any, timeout: float = 60.0) -> Any:
+        loop = self._sender_loop
+        if loop is None or not loop.is_running():
+            # Fallback for tests / early-teardown paths: spin a throwaway
+            # loop. Production path always has the worker running.
+            tmp = asyncio.new_event_loop()
+            try:
+                return tmp.run_until_complete(coro)
+            finally:
+                tmp.close()
+        future = asyncio.run_coroutine_threadsafe(coro, loop)
+        return future.result(timeout=timeout)
+
+    def _stop_sender_loop(self) -> None:
+        loop = self._sender_loop
+        if loop is not None and loop.is_running():
+            loop.call_soon_threadsafe(loop.stop)
+        if self._sender_loop_thread is not None:
+            self._sender_loop_thread.join(timeout=5.0)
 
     # ---- status --------------------------------------------------------
 
@@ -142,7 +193,7 @@ class TrayApp:
         if self._paused:
             return
         try:
-            asyncio.run(self._sender.upload(match))
+            self._run_on_sender_loop(self._sender.upload(match))
         except Exception:
             logger.exception("Failed to upload match %s", match.mtgo_match_id)
 
@@ -158,7 +209,7 @@ class TrayApp:
                         return
                     continue
                 try:
-                    ok = asyncio.run(self._sender.heartbeat())
+                    ok = self._run_on_sender_loop(self._sender.heartbeat())
                 except Exception:
                     logger.exception("Heartbeat raised")
                     ok = False
@@ -183,19 +234,37 @@ class TrayApp:
         interval_seconds = interval_hours * 3600
 
         def _loop() -> None:
-            while not self._stop.is_set():
-                self._check_updates_once()
-                if self._stop.wait(interval_seconds):
-                    return
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                while not self._stop.is_set():
+                    self._check_updates_once_on_loop(loop)
+                    if self._stop.wait(interval_seconds):
+                        return
+            finally:
+                loop.close()
 
         thread = threading.Thread(target=_loop, name="mtgo-updater", daemon=True)
         thread.start()
         self._update_thread = thread
 
     def _check_updates_once(self) -> None:
-        """Poll GitHub, download + verify if newer, stage for restart."""
+        """Poll GitHub, download + verify if newer, stage for restart.
+
+        Public entry point — used by the tray menu's manual check, which
+        spawns a fresh thread each time. Creates and closes its own loop.
+        """
+        loop = asyncio.new_event_loop()
         try:
-            result = asyncio.run(check_for_update(self._config))
+            asyncio.set_event_loop(loop)
+            self._check_updates_once_on_loop(loop)
+        finally:
+            loop.close()
+            asyncio.set_event_loop(None)
+
+    def _check_updates_once_on_loop(self, loop: asyncio.AbstractEventLoop) -> None:
+        try:
+            result = loop.run_until_complete(check_for_update(self._config))
         except Exception:
             logger.exception("Update check failed")
             return
@@ -209,7 +278,7 @@ class TrayApp:
 
         token = self._config.updates.github_token or None
         try:
-            staged = asyncio.run(download_and_verify(url, token))
+            staged = loop.run_until_complete(download_and_verify(url, token))
         except Exception:
             logger.exception("Update download raised")
             staged = None
@@ -305,9 +374,10 @@ class TrayApp:
         self._stop.set()
         self._stop_watcher()
         try:
-            asyncio.run(self._sender.close())
+            self._run_on_sender_loop(self._sender.close())
         except Exception:
             logger.exception("Error closing sender")
+        self._stop_sender_loop()
         if self._icon is not None:
             self._icon.stop()
         sys.exit(0)
