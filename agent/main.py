@@ -26,7 +26,7 @@ from agent.config import (
     log_dir_is_default,
     save_config,
 )
-from agent.instance_lock import InstanceLock
+from agent.instance_lock import InstanceLock, register_instance_lock
 from agent.raw_shipper import RawShipper
 from agent.sender import AgentSender
 from agent.tray import TrayApp
@@ -259,6 +259,7 @@ def main() -> None:
     if not instance_lock.acquire():
         logger.info("Another Manalog instance is already running — exiting.")
         sys.exit(0)
+    register_instance_lock(instance_lock)
 
     cfg_path = get_config_path()
     config, config_error = load_config_or_error(cfg_path)

@@ -22,6 +22,7 @@ except ImportError:  # pragma: no cover — optional in dev
 
 from agent import __version__
 from agent.config import AppConfig
+from agent.instance_lock import release_registered_lock
 
 
 logger = logging.getLogger(__name__)
@@ -32,12 +33,12 @@ ASSET_EXE = "Manalog.exe"
 ASSET_SHA = "Manalog.exe.sha256"
 
 
-def current_version() -> str:
-    return __version__ or "0.0.0"
-
-
 def _strip_v(tag: str) -> str:
     return tag.lstrip("vV")
+
+
+def current_version() -> str:
+    return _strip_v(__version__ or "") or "0.0.0"
 
 
 def _is_newer(latest: str, current: str) -> bool:
@@ -133,6 +134,11 @@ def apply_update(new_exe: Path) -> None:
     if sys.platform != "win32":
         logger.info("Would restart with %s (non-Windows, skipping)", new_exe)
         return
+    # Release the instance lock before launching the replacement, otherwise
+    # the new process sees the still-live parent PID in the lock file and
+    # bails. The parent's cleanup handlers run after SystemExit propagates,
+    # which is too late.
+    release_registered_lock()
     subprocess.Popen([str(new_exe)], close_fds=True)  # noqa: S603 — trusted path
     raise SystemExit(0)
 

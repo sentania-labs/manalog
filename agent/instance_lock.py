@@ -166,3 +166,28 @@ class InstanceLock:
 
     def __exit__(self, exc_type, exc, tb) -> None:
         self.release()
+
+
+# The updater relaunches the exe before the parent process exits, so the
+# parent's lock must be released before Popen — otherwise the replacement
+# finds a live PID in the lock file and bails. The live process registers
+# its lock here at startup; the updater calls release_registered_lock()
+# just before launching the replacement.
+_registered_lock: InstanceLock | None = None
+
+
+def register_instance_lock(lock: InstanceLock) -> None:
+    global _registered_lock
+    _registered_lock = lock
+
+
+def release_registered_lock() -> None:
+    global _registered_lock
+    lock = _registered_lock
+    _registered_lock = None
+    if lock is None:
+        return
+    try:
+        lock.release()
+    except Exception:
+        logger.exception("Failed to release registered instance lock")
