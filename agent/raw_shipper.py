@@ -269,7 +269,7 @@ class RawShipper:
             logger.exception("raw_shipper: failed reading %s", path)
             return
 
-        metadata = {
+        metadata: dict[str, Any] = {
             "original_name": path.name,
             "file_type": _file_type_for(path),
             "captured_at": datetime.fromtimestamp(
@@ -278,6 +278,8 @@ class RawShipper:
             "size": stat.st_size,
             "sha256": sha,
         }
+        if self._config.agent.agent_id:
+            metadata["agent_id"] = str(self._config.agent.agent_id)
         self._record_state(sha, path, status="pending", server_upload_id=None)
         await self._upload_with_retry(client, path, sha, data, metadata)
 
