@@ -1,6 +1,6 @@
 """agent_registration_id on game_log_archive — device attribution
 
-Revision ID: 003_agent_registration_on_archive
+Revision ID: 003_agent_reg_on_archive
 Revises: 002_game_log_archive
 Create Date: 2026-04-22
 
@@ -13,7 +13,7 @@ import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects import postgresql
 
-revision: str = "003_agent_registration_on_archive"
+revision: str = "003_agent_reg_on_archive"
 down_revision: Union[str, None] = "002_game_log_archive"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
